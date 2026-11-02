@@ -129,7 +129,7 @@ for (const mode of ['missing', 'delayed', 'throws'] as const) {
     await letter(page, 'Я').click();
     await expect(page.locator('#message')).toHaveText('Я');
     if (mode === 'throws') await expect(page.locator('#speech-status')).toContainText('Не удалось');
-    else await expect(page.locator('#voice-warning')).toBeVisible();
+    else await expect(page.locator('#notice-summary')).toHaveText('Нет русского голоса');
     if (mode === 'delayed') {
       await page.evaluate(() => (window as any).loadVoices());
       await expect(page.locator('#voice-warning')).toBeHidden();
@@ -147,11 +147,13 @@ test('missing speech API and denied storage leave input usable', async ({ page }
   await page.goto('./');
   await letter(page, 'Ё').click();
   await expect(page.locator('#message')).toHaveText('Ё');
+  await expect(page.locator('#notice-summary')).toBeVisible();
+  await page.locator('#settings-toggle').click();
   await expect(page.locator('#voice-warning')).toContainText('не поддерживает');
   await expect(page.locator('#storage-warning')).toBeVisible();
 });
 
-for (const [width, height] of [[320, 568], [360, 740], [390, 844], [430, 932], [600, 960], [667, 375], [844, 390], [768, 1024], [820, 1180], [1024, 768], [1180, 820], [1366, 1024], [1440, 900]]) {
+for (const [width, height] of [[320, 480], [320, 568], [360, 640], [390, 650], [390, 700], [390, 844], [430, 932], [568, 320], [600, 960], [667, 320], [667, 375], [844, 290], [844, 390], [768, 1024], [820, 1180], [1024, 768], [1180, 820], [1366, 1024], [1440, 900]]) {
   test(`touch targets and overflow at ${width}x${height}`, async ({ page }) => {
     await speechDouble(page);
     await page.setViewportSize({ width, height });
@@ -164,9 +166,10 @@ for (const [width, height] of [[320, 568], [360, 740], [390, 844], [430, 932], [
       }
       const measurements = await page.locator('.letter, .action').evaluateAll(elements => elements.map(el => {
         const rect = el.getBoundingClientRect();
-        return { width: rect.width, height: rect.height };
+        return { width: rect.width, height: rect.height, top: rect.top, left: rect.left, right: rect.right, bottom: rect.bottom };
       }));
-      expect(measurements.every(rect => rect.width >= 60 && rect.height >= 60)).toBe(true);
+      expect(measurements.every(rect => rect.width >= 44 && rect.height >= 44)).toBe(true);
+      expect(measurements.every(rect => rect.top >= 0 && rect.left >= 0 && rect.right <= width + 1 && rect.bottom <= height + 1)).toBe(true);
       const overlaps = await page.locator('.letter').evaluateAll(elements => {
         const bounds = elements.map(el => el.getBoundingClientRect());
         return bounds.some((a, i) => bounds.slice(i + 1).some(b =>
@@ -174,6 +177,7 @@ for (const [width, height] of [[320, 568], [360, 740], [390, 844], [430, 932], [
       });
       expect(overlaps).toBe(false);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1)).toBe(true);
       await letter(page, 'Ъ').click();
       await page.locator('#settings-toggle').click();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -232,6 +236,41 @@ test('installed service worker serves interface offline with saved text', async 
   await expect(page.locator('#message')).toHaveText('Ё');
   await letter(page, 'Ж').click();
   await expect(page.locator('#message')).toHaveText('ЁЖ');
-  await expect(page.locator('#offline-warning')).toBeVisible();
+  await expect(page.locator('#notice-summary')).toHaveText('Нет интернета');
   await context.setOffline(false);
+});
+
+test('phone browser bars, safe areas and long text keep all controls visible', async ({ page }) => {
+  await speechDouble(page);
+  await page.setViewportSize({ width: 390, height: 700 });
+  await page.goto('./');
+  await page.locator('#settings-toggle').click();
+  await page.locator('#letter-speech').uncheck();
+  await page.locator('#settings-close').click();
+  await page.evaluate(() => localStorage.setItem('govorilka.text.v1', 'ДЛИННЫЙ ТЕКСТ '.repeat(100)));
+  await page.reload();
+  for (const [width, height] of [[390, 650], [390, 720], [844, 290], [844, 340], [568, 320]]) {
+    await page.setViewportSize({ width, height });
+    const insetStyle = await page.addStyleTag({ content: width > height
+      ? '.communicator { padding-left: 47px !important; padding-right: 47px !important; padding-bottom: 21px !important; }'
+      : '.communicator { padding-bottom: 34px !important; }' });
+    await expect(async () => {
+      const boxes = await page.locator('.letter, .action, #settings-toggle').evaluateAll(elements => elements.map(el => {
+        const rect = el.getBoundingClientRect();
+        return { top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right, width: rect.width, height: rect.height };
+      }));
+      expect(boxes.every(box => box.top >= 0 && box.bottom <= height + 1 && box.left >= 0 && box.right <= width + 1)).toBe(true);
+      expect(boxes.every(box => box.width >= 44 && box.height >= 44)).toBe(true);
+      expect(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1 && document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      expect(await page.locator('#message').evaluate(el => el.scrollTop + el.clientHeight >= el.scrollHeight - 2)).toBe(true);
+    }).toPass();
+    await letter(page, 'Я').click();
+    await expect(page.locator('#message')).toContainText('Я');
+    await insetStyle.evaluate(el => el.parentNode?.removeChild(el));
+  }
+  await page.locator('#settings-toggle').click();
+  await expect(page.locator('#settings-panel')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#settings-panel')).toBeHidden();
+  await expect(page.locator('#settings-toggle')).toBeFocused();
 });

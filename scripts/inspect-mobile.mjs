@@ -9,11 +9,14 @@ try {
   await page.locator('#settings-toggle').tap();
   await page.locator('#letter-speech').uncheck();
   await page.locator('#settings-close').tap();
-  for (const value of 'ВАЛЯ') await page.locator(`[data-letter="${value}"]`).tap();
+  for (const value of 'ВАЛЯ ДОМА') {
+    if (value === ' ') await page.locator('#space').tap();
+    else await page.locator(`[data-letter="${value}"]`).tap();
+  }
   await mkdir('artifacts', { recursive: true });
   for (const [name, width, height] of [
-    ['mobile', 390, 844],
-    ['phone-landscape', 844, 390],
+    ['mobile', 390, 700],
+    ['phone-landscape', 844, 320],
     ['tablet-portrait', 768, 1024],
     ['tablet-landscape', 1024, 768],
     ['desktop', 1440, 1000],
